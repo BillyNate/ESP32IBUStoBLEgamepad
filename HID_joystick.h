@@ -27,8 +27,8 @@
  * @note Thank you very much Neil Kolban for this impressive work!
 */
 
-#ifndef _HID_kbdmousejoystick_H_
-#define _HID_kbdmousejoystick_H_
+#ifndef _HID_joystick_H_
+#define _HID_joystick_H_
 
 
 #ifdef __cplusplus
@@ -39,15 +39,6 @@ extern "C" {
 #include <freertos/event_groups.h>
 #include <freertos/queue.h>
 #include <esp_log.h>
-#include <keyboard.h>
-
-/** @brief Queue for sending mouse reports
- * @see mouse_command_t */
-extern QueueHandle_t mouse_q;
-
-/** @brief Queue for sending keyboard reports
- * @see keyboard_command_t */
-extern QueueHandle_t keyboard_q;
 
 /** @brief Queue for sending joystick reports
  * @see joystick_command_t */
@@ -55,73 +46,37 @@ extern QueueHandle_t joystick_q;
 
 /** @brief Main init function to start HID interface
  * 
- * @param enableKeyboard If != 0, keyboard will be active
- * @param enableMouse If != 0, mouse will be active
  * @param enableJoystick If != 0, joystick will be active
  * @param testmode If set to 0, HID data is only sent if something is put
  * to the queue. If set != 0, keyboard/mouse/joystick will send test data.
  * @note After init, just use the queues! */
-esp_err_t HID_kbdmousejoystick_init(uint8_t enableKeyboard, uint8_t enableMouse, uint8_t enableJoystick, uint8_t testmode, char * name);
+esp_err_t HID_joystick_init(uint8_t testmode, char * name);
 
 /** @brief Activate pairing, disconnect from paired device
  * */
-esp_err_t HID_kbdmousejoystick_activatePairing(void);
+esp_err_t HID_joystick_activatePairing(void);
 
 /** @brief Deactivate pairing, disconnect from paired device
  * */
-esp_err_t HID_kbdmousejoystick_deactivatePairing(void);
-
-/** @brief Directly send a HID keyboard report
- * 
- * @param a Pointer to report buffer
- * @param len Size of report buffer
- * @note Buffer lenght must equal 8 Bytes!
- * @note 1st Byte is modifier, 2nd is empty, 3 to 8 are keycodes
- * */
-esp_err_t HID_kbdmousejoystick_rawKeyboard(uint8_t *a, uint8_t len);
-
-/** @brief Directly send a HID mouse report
- * 
- * @param a Pointer to report buffer
- * @param len Size of report buffer
- * @note Buffer lenght must equal 4 Bytes!
- * @note 1st Byte is button mask, 2nd/3rd are X/Y, 4th is wheel
- * */
-esp_err_t HID_kbdmousejoystick_rawMouse(uint8_t *a, uint8_t len);
+esp_err_t HID_joystick_deactivatePairing(void);
 
 /** @brief Is the BLE currently connected?
  * @return 0 if not connected, 1 if connected */  
-uint8_t HID_kbdmousejoystick_isConnected(void);
-
-
-/** @brief One mouse command (report) to be sent via BLE mouse profile
- * @see mouse_q */
-typedef struct mouse_command {
-  int8_t x;
-  int8_t y;
-  int8_t wheel;
-  uint8_t buttons;
-} mouse_command_t;
+uint8_t HID_joystick_isConnected(void);
 
 /** @brief One command (report) to be issued via BLE joystick profile
  * @see joystick_q */
 typedef struct joystick_command {
-  /** @brief Button mask, allows up to 32 different buttons */
-  uint32_t buttonmask;
-  /** @brief X-axis value, 0-1023 */
-  uint16_t Xaxis;
-  /** @brief Y-axis value, 0-1023 */
-  uint16_t Yaxis;
-  /** @brief Z-axis value, 0-1023 */
-  uint16_t Zaxis;
-  /** @brief Z-rotate value, 0-1023 */
-  uint16_t Zrotate;
-  /** @brief Slider left value, 0-1023 */
-  uint16_t sliderLeft;
-  /** @brief Slider right value, 0-1023 */
-  uint16_t sliderRight;
-  /** @brief Hat position (0-360), mapped to 8 directions. Use <0 for no pressing*/
-  int16_t hat;
+  /** @brief Button mask, allows 8 different buttons */
+  uint8_t buttons;
+  /** @brief X-axis value, -127 - 127 */
+  int8_t Xaxis;
+  /** @brief Y-axis value,  -127 - 127 */
+  int8_t Yaxis;
+  /** @brief X-rotate value,  -127 - 127 */
+  int8_t Xrotate;
+  /** @brief Y-rotate value,  -127 - 127 */
+  int8_t Yrotate;
 } joystick_command_t;
 
 /** @brief Type of keycode action.
@@ -137,19 +92,8 @@ typedef enum {
   RELEASE_ALL
 } keyboard_action;
 
-/** @brief One command (report) to be issued via BLE keyboard profile
- * @see keyboard_q */
-typedef struct keyboard_command {
-  /** @brief type of this keyboard action */
-  keyboard_action type;
-  /** list of keycodes+modfiers to be pressed/released.
-   * @note Low byte contains the keycode, high byte any modifiers
-   * */
-  uint16_t keycode;
-} keyboard_command_t;
-
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* _HID_kbdmousejoystick_H_ */
+#endif /* _HID_joystick_H_ */
