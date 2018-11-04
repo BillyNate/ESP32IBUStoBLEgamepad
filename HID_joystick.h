@@ -47,10 +47,9 @@ extern QueueHandle_t joystick_q;
 /** @brief Main init function to start HID interface
  * 
  * @param enableJoystick If != 0, joystick will be active
- * @param testmode If set to 0, HID data is only sent if something is put
  * to the queue. If set != 0, keyboard/mouse/joystick will send test data.
  * @note After init, just use the queues! */
-esp_err_t HID_joystick_init(uint8_t testmode, char * name);
+esp_err_t HID_joystick_init(char * name);
 
 /** @brief Activate pairing, disconnect from paired device
  * */
@@ -69,14 +68,14 @@ uint8_t HID_joystick_isConnected(void);
 typedef struct joystick_command {
   /** @brief Button mask, allows 8 different buttons */
   uint8_t buttons;
-  /** @brief X-axis value, -127 - 127 */
-  int8_t Xaxis;
-  /** @brief Y-axis value,  -127 - 127 */
-  int8_t Yaxis;
-  /** @brief X-rotate value,  -127 - 127 */
-  int8_t Xrotate;
-  /** @brief Y-rotate value,  -127 - 127 */
-  int8_t Yrotate;
+  /** @brief X-axis value, 1000 - 2000 */
+  uint16_t Xaxis;
+  /** @brief Y-axis value, 1000 - 2000 */
+  uint16_t Yaxis;
+  /** @brief X-rotate value, 1000 - 2000 */
+  uint16_t Xrotate;
+  /** @brief Y-rotate value, 1000 - 2000 */
+  uint16_t Yrotate;
 } joystick_command_t;
 
 /** @brief Type of keycode action.

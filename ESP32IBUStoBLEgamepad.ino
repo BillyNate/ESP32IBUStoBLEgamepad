@@ -13,8 +13,16 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
  * MA 02110-1301, USA.
+ */
+
+/*
+ * This code is based on the BLE mouse/keyboard by Asterics (https://github.com/asterics/esp32_mouse_keyboard),
+ * which in turn is based on the BLE HID sample by Neil Kolban and chegewara (https://github.com/nkolban/esp32-snippets/blob/master/cpp_utils/tests/BLETests/SampleHIDDevice.cpp).
+ * It requires two libraries in order to work:
+ * - ESP32_BLE_Arduino by Neil Kolban (https://github.com/nkolban/ESP32_BLE_Arduino)
+ * - FlySkyIbus by Tim Wilkinson (https://gitlab.com/timwilkinson/FlySkyIBus)
  * 
- * Copyright 2017 Benjamin Aigner <beni@asterics-foundation.org>
+ * Current project can be found at https://github.com/BillyNate/ESP32IBUStoBLEgamepad
  */
 
 #include <stdio.h>
@@ -34,14 +42,11 @@
 #include "config.h"
 #include "HID_joystick.h"
 
+#include "FlySkyIBus.h"
+
 #include "esp_gap_ble_api.h"
 #include "driver/gpio.h"
-#include "driver/uart.h"
 
-#define EXT_UART_TAG "EXT_UART"
-#define CONSOLE_UART_TAG "CONSOLE_UART"
-
-//static joystick_data_t joystick;//currently unused, no joystick implemented
 static config_data_t config;
 
 
@@ -49,49 +54,52 @@ void update_config()
 {
   nvs_handle my_handle;
   esp_err_t err = nvs_open("config_c", NVS_READWRITE, &my_handle);
-  if(err != ESP_OK) ESP_LOGE("MAIN","error opening NVS");
+  if(err != ESP_OK) ESP_LOGE("MAIN", "error opening NVS");
   err = nvs_set_str(my_handle, "btname", config.bt_device_name);
-  if(err != ESP_OK) ESP_LOGE("MAIN","error saving NVS - bt name");
-  err = nvs_set_u8(my_handle, "locale", config.locale);
-  if(err != ESP_OK) ESP_LOGE("MAIN","error saving NVS - locale");
+  if(err != ESP_OK) ESP_LOGE("MAIN", "error saving NVS - bt name");
   printf("Committing updates in NVS ... ");
   err = nvs_commit(my_handle);
   printf((err != ESP_OK) ? "Failed!\n" : "Done\n");
   nvs_close(my_handle);
 }
 
-void uart_console(void *pvParameters)
+void ibus_task(void *pvParameter)
 {
-  char character;
+  ESP_LOGI("IBUS", "IBus processing task started");
+
+  uint16_t channels[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+  uint8_t i;
   joystick_command_t joystickCmd;
-  
-  ESP_LOGI("UART", "console UART processing task started");
+  joystickCmd.buttons = 0;
   
   while(1)
   {
-    if(joystick_q == NULL)
+    IBus.loop();
+    for(i=0; i<8; i++)
     {
-      ESP_LOGE(CONSOLE_UART_TAG, "queue not initialized");
-      continue;
+      channels[i] = IBus.readChannel(i);
     }
 
-    if(HID_joystick_isConnected() != 0)
+    if(HID_joystick_isConnected() != 0 && joystick_q != NULL)
     {
-      joystickCmd.buttons = rand() % 256;
-      joystickCmd.Xaxis = (rand() % 256) - 128;
-      joystickCmd.Yaxis = (rand() % 256) - 128;
-      joystickCmd.Xrotate = (rand() % 256) - 128;
-      joystickCmd.Yrotate = (rand() % 256) - 128;
+      joystickCmd.Xaxis = channels[0] >= 1000 ? channels[0] : 1500;
+      joystickCmd.Yaxis = channels[1] >= 1000 ? channels[1] : 1500;
+      joystickCmd.Xrotate = channels[2] >= 1000 ? channels[2] : 1500;
+      joystickCmd.Yrotate = channels[3] >= 1000 ? channels[3] : 1500;
 
-      ESP_LOGI(CONSOLE_UART_TAG, "testing joystick: %d/%d/%d/%d/%d", joystickCmd.buttons, joystickCmd.Xaxis, joystickCmd.Yaxis, joystickCmd.Xrotate, joystickCmd.Yrotate);
+      // Uncomment for testing:
+      /*
+      joystickCmd.buttons = (rand() % 4) + 2;
+      joystickCmd.Xaxis = (rand() % 1000) + 1000;
+      joystickCmd.Yaxis = (rand() % 1000) + 1000;
+      joystickCmd.Xrotate = (rand() % 1000) + 1000;
+      joystickCmd.Yrotate = (rand() % 1000) + 1000;
+      */
       xQueueSend(joystick_q, (void*)&joystickCmd, (TickType_t)0);
-      
-      vTaskDelay(1000);
     }
-    else
-    {
-      vTaskDelay(100);
-    }
+
+    // What would be the best update speed? Too fast is causing errors in sending out the BLE Notify...
+    vTaskDelay(20 / portTICK_PERIOD_MS);
   }
 }
 
@@ -162,13 +170,23 @@ extern "C" void app_main()
   }
   nvs_close(my_handle);
   
-  //activate mouse & keyboard BT stack (joystick is not working yet)
-  HID_joystick_init(0, config.bt_device_name);
+  // Activate joystick BT stack
+  HID_joystick_init(config.bt_device_name);
   ESP_LOGI("HIDD", "MAIN finished...");
-  
+
+  // Activate IBus serial receiver
+  IBus.begin(Serial2, 115200, SERIAL_8N1, IBUS_SERIAL_RXPIN);
+
+  // Set log level to >= INFO for all
   esp_log_level_set("*", ESP_LOG_INFO); 
+
+  // Make sure the serial connection is real
+  while(!Serial2)
+  {
+    delay(50);
+  }
   
-  // now start the tasks for processing UART input and indicator LED  
-  xTaskCreate(&uart_console, "console", 4096, NULL, configMAX_PRIORITIES, NULL);
+  // now start the tasks for processing IBus input and indicator LED
   xTaskCreate(&blink_task, "blink", 4096, NULL, configMAX_PRIORITIES, NULL);
+  xTaskCreate(&ibus_task, "ibus", 4096, NULL, configMAX_PRIORITIES, NULL);
 }

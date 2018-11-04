@@ -50,9 +50,6 @@ QueueHandle_t joystick_q;
 /// @brief Is the BLE currently connected?
 uint8_t isConnected = 0;
 
-///@brief Is this device in testmode (automatically sending HID reports)?
-uint8_t testmode = 0;
-
 ///@brief The BT Devicename for advertising
 char btname[40];
 
@@ -72,31 +69,39 @@ BLECharacteristic* inputJoystick;
  * @note Report id is on all reports in offset 7.
  * */
 const uint8_t reportMapJoystick[] = {
-  USAGE_PAGE(1),            0x01, // Generic Desktop
-  USAGE(1),                 0x05, // Gamepad?
-  COLLECTION(1),            0x01, // Application
-    COLLECTION(1),          0x00, // Physical
+  USAGE_PAGE(1),            0x01,  // Generic Desktop
+  USAGE(1),                 0x05,  // Gamepad?
+  COLLECTION(1),            0x01,  // Application
+    COLLECTION(1),          0x00,  // Physical
       REPORT_ID(1),         0x01,
-      
-      USAGE_PAGE(1),        0x09, // Button
-      USAGE_MINIMUM(1),     0x01,
-      USAGE_MAXIMUM(1),     0x08, // 8 buttons
-      LOGICAL_MINIMUM(1),   0x00,
-      LOGICAL_MAXIMUM(1),   0x01,
-      REPORT_SIZE(1),       0x01,
-      REPORT_COUNT(1),      0x08, // 8 reports
-      HIDINPUT(1),          0x02, // data, variable, absolute
-      
+
+      /*
       USAGE_PAGE(1),        0x01,
+      */
       USAGE(1),             0x30,  // X axis
       USAGE(1),             0x31,  // Y axis
       USAGE(1),             0x33,  // X rotation
       USAGE(1),             0x34,  // Y rotation
-      LOGICAL_MINIMUM(1),   0x81,  // -127
-      LOGICAL_MAXIMUM(1),   0x7f,  //  127
-      REPORT_SIZE(1),       0x08,
-      REPORT_COUNT(1),      0x04,
-      HIDINPUT(1),          0x02, // data, variable, absolute
+      /*
+      LOGICAL_MINIMUM(2),   0xE8, 0x03,// 1000
+      LOGICAL_MAXIMUM(2),   0xD0, 0x07,// 2000
+      */
+      LOGICAL_MINIMUM(2),   0x00, 0x00,// 0000
+      LOGICAL_MAXIMUM(2),   0xE8, 0x03,// 1000
+      PHYSICAL_MINIMUM(2),  0x00, 0x00,// 0000
+      PHYSICAL_MAXIMUM(2),  0xE8, 0x03,// 1000
+      REPORT_SIZE(1),       0x10,  // 16bit values
+      REPORT_COUNT(1),      0x04,  // 4 values (the 4 usages)
+      HIDINPUT(1),          0x02,  // data, variable, absolute
+      
+      USAGE_PAGE(1),        0x09,  // Button
+      USAGE_MINIMUM(1),     0x01,
+      USAGE_MAXIMUM(1),     0x08,  // 8 buttons
+      LOGICAL_MINIMUM(1),   0x00,
+      LOGICAL_MAXIMUM(1),   0x01,
+      REPORT_SIZE(1),       0x01,
+      REPORT_COUNT(1),      0x08,  // 8 reports
+      HIDINPUT(1),          0x02,  // data, variable, absolute
       
     END_COLLECTION(0),
   END_COLLECTION(0)
@@ -109,31 +114,23 @@ class JoystickTask : public Task
     joystick_command_t cmd;
     while(1)
     {
-      //if we are in test mode, set the sticks and buttons to something
-      if(testmode)
+      // wait for a new joystick command
+      if(xQueueReceive(joystick_q, &cmd, 10000))
       {
-        uint8_t a[5] = {255, 100, 200, 150, 250};
-        ESP_LOGI(LOG_TAG, "Sending joystick report: ");
-        ESP_LOG_BUFFER_HEXDUMP(LOG_TAG, a, sizeof(a), ESP_LOG_INFO);
+        //ESP_LOGI(LOG_TAG, "Joystick received: %d/%d/%d/%d", cmd.Xaxis, cmd.Yaxis, cmd.Xrotate, cmd.Yrotate);
+        uint8_t a[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+        a[0] = (cmd.Xaxis - 1000) & 0xff;
+        a[1] = ((cmd.Xaxis - 1000) >> 8);
+        a[2] = (cmd.Yaxis - 1000) & 0xff;
+        a[3] = ((cmd.Yaxis - 1000) >> 8);
+        a[4] = (cmd.Xrotate - 1000) & 0xff;
+        a[5] = ((cmd.Xrotate - 1000) >> 8);
+        a[6] = (cmd.Yrotate - 1000) & 0xff;
+        a[7] = ((cmd.Yrotate - 1000) >> 8);
+        a[8] = cmd.buttons;
+        
         inputJoystick->setValue(a, sizeof(a));
         inputJoystick->notify();
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-      }
-      if(!testmode)
-      {
-        //wait for a new joystick command
-        if(xQueueReceive(joystick_q, &cmd, 10000))
-        {
-          ESP_LOGI(LOG_TAG, "Joystick received: %d/%d/%d/%d/%d", cmd.buttons, cmd.Xaxis, cmd.Yaxis, cmd.Xrotate, cmd.Yrotate);
-          uint8_t a[5] = {0, 0, 0, 0, 0};
-          a[0] = cmd.buttons;
-          a[1] = cmd.Xaxis;
-          a[2] = cmd.Yaxis;
-          a[3] = cmd.Xrotate;
-          a[4] = cmd.Yrotate;
-          inputJoystick->setValue(a, sizeof(a));
-          inputJoystick->notify();
-        }
       }
     }
   }
@@ -261,7 +258,7 @@ class BLE_HOG: public Task
      * Set manufacturer name
      * https://www.bluetooth.com/specifications/gatt/viewer?attributeXmlFile=org.bluetooth.characteristic.manufacturer_name_string.xml
      */
-    std::string name = "AsTeRICS Foundation";
+    std::string name = "Unknown";
     hid->manufacturer()->setValue(name);
 
     /*
@@ -295,7 +292,7 @@ class BLE_HOG: public Task
     
     if(reportMap == nullptr)
     {
-      ESP_LOGE(LOG_TAG,"Cannot allocate memory for the report map, cannot start HID");
+      ESP_LOGE(LOG_TAG, "Cannot allocate memory for the report map, cannot start HID");
     }
     else
     {
@@ -307,7 +304,7 @@ class BLE_HOG: public Task
       //create in characteristics/reports for joystick
       inputJoystick = hid->inputReport(reportID);
       
-      ESP_LOGI(LOG_TAG,"Joystick added @report ID %d, current report Map:", reportID);
+      ESP_LOGI(LOG_TAG, "Joystick added @report ID %d, current report Map:", reportID);
       ESP_LOG_BUFFER_HEXDUMP(LOG_TAG, reportMap, (uint16_t)(reportMapCurrent-reportMap), ESP_LOG_INFO);
       
       ESP_LOGI(LOG_TAG, "Final report map size: %d B", reportMapSize);
@@ -339,6 +336,7 @@ class BLE_HOG: public Task
     BLESecurity *pSecurity = new BLESecurity();
  
     pSecurity->setCapability(ESP_IO_CAP_NONE);
+    pSecurity->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
 
     ESP_LOGI(LOG_TAG, "Advertising started!");
     while(1)
@@ -377,16 +375,13 @@ extern "C"
   /** @brief Main init function to start HID interface (C interface)
    * 
    * @note After init, just use the queues! */
-  esp_err_t HID_joystick_init(uint8_t testmode, char *name)
+  esp_err_t HID_joystick_init(char *name)
   {
     //init FreeRTOS queues
     //initialise queues, even if they might not be used.
     joystick_q = xQueueCreate(32, sizeof(joystick_command_t));
     
     strncpy(btname, name, sizeof(btname) - 1);
-    
-    //save enabled interfaces
-    testmode = testmode;
     
     //init Neil Kolban's HOG task
     BLE_HOG* blehid = new BLE_HOG();
