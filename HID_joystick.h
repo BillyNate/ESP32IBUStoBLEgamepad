@@ -44,6 +44,10 @@ extern "C" {
  * @see joystick_command_t */
 extern QueueHandle_t joystick_q;
 
+/** @brief Queue for sending mouse reports
+ * @see mouse_command_t */
+extern QueueHandle_t mouse_q;
+
 /** @brief Main init function to start HID interface
  * 
  * @param enableJoystick If != 0, joystick will be active
@@ -77,6 +81,17 @@ typedef struct joystick_command {
   /** @brief Y-rotate value, 1000 - 2000 */
   uint16_t Yrotate;
 } joystick_command_t;
+
+/** @brief One mouse command (report) to be sent via BLE mouse profile
+ * @see mouse_q */
+typedef struct mouse_command {
+  /** @brief Button mask, allows 8 different buttons */
+  uint8_t buttons;
+  /** @brief X value, 1000 - 2000 */
+  uint8_t x;
+  /** @brief Y value, 1000 - 2000 */
+  uint8_t y;
+} mouse_command_t;
 
 /** @brief Type of keycode action.
  * 

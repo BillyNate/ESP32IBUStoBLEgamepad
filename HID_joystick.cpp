@@ -46,6 +46,8 @@ static char LOG_TAG[] = "HAL_BLE";
 
 /// @brief Input queue for sending joystick reports
 QueueHandle_t joystick_q;
+/// @brief Input queue for sending mouse reports
+QueueHandle_t mouse_q;
 
 /// @brief Is the BLE currently connected?
 uint8_t isConnected = 0;
@@ -60,6 +62,8 @@ static BLEHIDDevice* hid;
 BLEServer *pServer;
 //characteristic for sending joystick reports to the host
 BLECharacteristic* inputJoystick;
+//characteristic for sending mouse reports to the host
+BLECharacteristic* inputMouse;
 
 /** @brief Constant report map for joystick
  * 
@@ -72,8 +76,8 @@ const uint8_t reportMapJoystick[] = {
   USAGE_PAGE(1),            0x01,  // Generic Desktop
   USAGE(1),                 0x05,  // Gamepad?
   COLLECTION(1),            0x01,  // Application
+    REPORT_ID(1),           0x01,
     COLLECTION(1),          0x00,  // Physical
-      REPORT_ID(1),         0x01,
 
       /*
       USAGE_PAGE(1),        0x01,
@@ -102,6 +106,53 @@ const uint8_t reportMapJoystick[] = {
       REPORT_SIZE(1),       0x01,
       REPORT_COUNT(1),      0x08,  // 8 reports
       HIDINPUT(1),          0x02,  // data, variable, absolute
+      
+    END_COLLECTION(0),
+  END_COLLECTION(0)
+};
+
+/** @brief Constant report map for mouse
+ * 
+ * This report map will be used on init do build a report map according
+ * to init functions (with activated interfaces).
+ * 
+ * @note Report id is on all reports in offset 7.
+ * */
+const uint8_t reportMapMouse[] = {
+  USAGE_PAGE(1),          0x01,  // Generic Desktop
+  USAGE(1),               0x02,  // Mouse
+  COLLECTION(1),          0x01,  // Application
+    REPORT_ID(1),         0x02,
+    /*
+    USAGE(1),             0x01,
+    */
+    COLLECTION(1),        0x00,
+
+      /*
+      USAGE_PAGE(1),      0x01,   // (Generic Desktop)
+      */
+      USAGE(1),           0x30,   // X
+      USAGE(1),           0x31,   // Y
+      LOGICAL_MINIMUM(1), 0x81,   // -127
+      LOGICAL_MAXIMUM(1), 0x7f,   //  127
+      PHYSICAL_MINIMUM(1),0x81,   // -127
+      PHYSICAL_MAXIMUM(1),0x7f,   //  127
+      REPORT_SIZE(1),     0x08,   // 8bit values
+      REPORT_COUNT(1),    0x02,   // 2 bytes: X, Y
+      HIDINPUT(1),        0x06,   // (Data, Variable, Relative)
+    
+      USAGE_PAGE(1),      0x09,
+      USAGE_MINIMUM(1),   0x01,
+      USAGE_MAXIMUM(1),   0x02,
+      LOGICAL_MINIMUM(1), 0x00,
+      LOGICAL_MAXIMUM(1), 0x01,
+      REPORT_COUNT(1),    0x02,
+      REPORT_SIZE(1),     0x01,
+      HIDINPUT(1),        0x02,   // (Data, Variable, Absolute)
+      
+      REPORT_COUNT(1),    0x06,   // 6 bit padding
+      REPORT_SIZE(1),     0x01,
+      HIDINPUT(1),        0x03,   // (Constant, Variable, Absolute)
       
     END_COLLECTION(0),
   END_COLLECTION(0)
@@ -137,6 +188,29 @@ class JoystickTask : public Task
 };
 JoystickTask *joystick; //instance for this task
 
+class MouseTask : public Task
+{
+  void run(void*)
+  {
+    mouse_command_t cmd;
+    while(1)
+    {
+      if(xQueueReceive(mouse_q, &cmd, 10000))
+      {
+        //ESP_LOGI(LOG_TAG, "mouse command: %d,%d,%d,%d", cmd.buttons, cmd.x, cmd.y);
+        uint8_t a[] = {0, 0, 0};
+        a[0] = cmd.x;
+        a[1] = cmd.y;
+        a[2] = cmd.buttons;
+        
+        inputMouse->setValue(a, sizeof(a));
+        inputMouse->notify();
+      }
+    }
+  }
+};
+MouseTask *mouse; //instance for this task
+
 class CBs: public BLEServerCallbacks
 {
   void onConnect(BLEServer* pServer)
@@ -148,6 +222,10 @@ class CBs: public BLEServerCallbacks
     desc = (BLE2902*) inputJoystick->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
     desc->setNotifications(true);
     joystick->start();
+
+    desc = (BLE2902*) inputMouse->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
+    desc->setNotifications(true);
+    mouse->start();
       
     ESP_LOGI(LOG_TAG, "Client connected!");
   }
@@ -161,6 +239,10 @@ class CBs: public BLEServerCallbacks
     desc = (BLE2902*) inputJoystick->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
     desc->setNotifications(false);
     joystick->stop();
+    
+    desc = (BLE2902*) inputMouse->getDescriptorByUUID(BLEUUID((uint16_t)0x2902));
+    desc->setNotifications(false);
+    mouse->stop();
     
     //restart advertising
     BLEAdvertising *pAdvertising = pServer->getAdvertising();
@@ -243,6 +325,9 @@ class BLE_HOG: public Task
     joystick = new JoystickTask();
     joystick->setStackSize(8096);
     
+    mouse = new MouseTask();
+    mouse->setStackSize(8096);
+    
     BLEDevice::init(btname);
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new CBs());
@@ -285,6 +370,7 @@ class BLE_HOG: public Task
      */
     size_t reportMapSize = 0;
     reportMapSize += sizeof(reportMapJoystick);
+    reportMapSize += sizeof(reportMapMouse);
     
     uint8_t *reportMap = (uint8_t *)malloc(reportMapSize);
     uint8_t *reportMapCurrent = reportMap;
@@ -298,13 +384,21 @@ class BLE_HOG: public Task
     {
       //copy report map for joystick to allocated full report map, if activated
       memcpy(reportMapCurrent, reportMapJoystick, sizeof(reportMapJoystick));
-      reportMap[7] = reportID;
       reportMapCurrent += sizeof(reportMapJoystick);
       
       //create in characteristics/reports for joystick
-      inputJoystick = hid->inputReport(reportID);
+      inputJoystick = hid->inputReport(reportMapJoystick[7]);
       
-      ESP_LOGI(LOG_TAG, "Joystick added @report ID %d, current report Map:", reportID);
+      ESP_LOGI(LOG_TAG, "Joystick added @report ID %d, current report Map:", reportMapJoystick[7]);
+      ESP_LOG_BUFFER_HEXDUMP(LOG_TAG, reportMap, (uint16_t)(reportMapCurrent-reportMap), ESP_LOG_INFO);
+
+      memcpy(reportMapCurrent, reportMapMouse, sizeof(reportMapMouse));
+      reportMapCurrent += sizeof(reportMapMouse);
+      
+      //create in characteristics/reports for mouse
+      inputMouse = hid->inputReport(reportMapMouse[7]);
+      
+      ESP_LOGI(LOG_TAG, "Mouse added @report ID %d, current report Map:", reportMapMouse[7]);
       ESP_LOG_BUFFER_HEXDUMP(LOG_TAG, reportMap, (uint16_t)(reportMapCurrent-reportMap), ESP_LOG_INFO);
       
       ESP_LOGI(LOG_TAG, "Final report map size: %d B", reportMapSize);
@@ -380,6 +474,7 @@ extern "C"
     //init FreeRTOS queues
     //initialise queues, even if they might not be used.
     joystick_q = xQueueCreate(32, sizeof(joystick_command_t));
+    mouse_q = xQueueCreate(32, sizeof(mouse_command_t));
     
     strncpy(btname, name, sizeof(btname) - 1);
     

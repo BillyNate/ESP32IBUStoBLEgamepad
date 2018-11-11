@@ -69,6 +69,7 @@ void ibus_task(void *pvParameter)
 
   uint16_t channels[8] = {0, 0, 0, 0, 0, 0, 0, 0};
   uint8_t i;
+  mouse_command_t mouseCmd;
   joystick_command_t joystickCmd;
   joystickCmd.buttons = 0;
   
@@ -82,11 +83,66 @@ void ibus_task(void *pvParameter)
 
     if(HID_joystick_isConnected() != 0 && joystick_q != NULL)
     {
-      joystickCmd.Xaxis = channels[0] >= 1000 ? channels[0] : 1500;
-      joystickCmd.Yaxis = channels[1] >= 1000 ? channels[1] : 1500;
-      joystickCmd.Xrotate = channels[2] >= 1000 ? channels[2] : 1500;
-      joystickCmd.Yrotate = channels[3] >= 1000 ? channels[3] : 1500;
+      channels[4]; // middle switch; 1000 or 2000, sometimes hits 1500
+      channels[5]; // left back switch; 1000, 1500 or 2000
+      channels[6]; // knob
+      channels[7]; // right back switch; 1000, 1500 or 2000
+      
 
+      if(channels[4] < 1500) // Middle switch flicked up
+      {
+        joystickCmd.Xaxis = channels[0] >= 1000 ? channels[0] : 1500;
+        joystickCmd.Yaxis = channels[1] >= 1000 ? channels[1] : 1500;
+        joystickCmd.Xrotate = channels[2] >= 1000 ? channels[2] : 1500;
+        joystickCmd.Yrotate = channels[3] >= 1000 ? channels[3] : 1500;
+      }
+      else
+      {
+        joystickCmd.Xaxis = 1500;
+        joystickCmd.Yaxis = 1500;
+        joystickCmd.Xrotate = 1500;
+        joystickCmd.Yrotate = 1500;
+
+        if(channels[0] > 1510)
+        {
+          mouseCmd.x = (channels[0] - 1500) / 20;
+        }
+        else if(channels[0] < 1490)
+        {
+          mouseCmd.x = 0xff - 25 + (channels[0] - 1000) / 20;
+        }
+        else
+        {
+          mouseCmd.x = 0;
+        }
+        
+        if(channels[1] > 1510)
+        {
+          //mouseCmd.y = (channels[1] - 1500) / 10;
+          mouseCmd.y = 0xff - (channels[1] - 1500) / 20;
+        }
+        else if(channels[1] < 1490)
+        {
+          //mouseCmd.y = 0xff - 50 + (channels[1] - 1000) / 10;
+          mouseCmd.y = 25 - (channels[1] - 1000) / 20;
+        }
+        else
+        {
+          mouseCmd.y = 0;
+        }
+        
+        /*
+        mouseCmd.x = (channels[0] - 1000) / 4 - 127;
+        mouseCmd.y = (channels[1] - 1000) / 4 - 127;
+        */
+        mouseCmd.buttons = 0;
+        if(channels[7] > 1250)
+        {
+          mouseCmd.buttons = 1;
+        }
+        xQueueSend(mouse_q, (void *)&mouseCmd, (TickType_t) 0);
+      }
+      
       // Uncomment for testing:
       /*
       joystickCmd.buttons = (rand() % 4) + 2;
