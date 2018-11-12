@@ -68,9 +68,12 @@ void ibus_task(void *pvParameter)
   ESP_LOGI("IBUS", "IBus processing task started");
 
   uint16_t channels[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+  uint16_t lastKnobValue = 0;
   uint8_t i;
   mouse_command_t mouseCmd;
   joystick_command_t joystickCmd;
+  volume_command_t volumeCmd;
+  
   joystickCmd.buttons = 0;
   
   while(1)
@@ -141,6 +144,26 @@ void ibus_task(void *pvParameter)
           mouseCmd.buttons = 1;
         }
         xQueueSend(mouse_q, (void *)&mouseCmd, (TickType_t) 0);
+      }
+
+      if(lastKnobValue != 0 && channels[6] > lastKnobValue + 1)
+      {
+        volumeCmd.updown = 2;
+        xQueueSend(volume_q, (void*)&volumeCmd, (TickType_t)0);
+      }
+      else if(lastKnobValue != 0 && channels[6] < lastKnobValue - 1)
+      {
+        volumeCmd.updown = 1;
+        xQueueSend(volume_q, (void*)&volumeCmd, (TickType_t)0);
+      }
+      else if(volumeCmd.updown != 0)
+      {
+        volumeCmd.updown = 0;
+        xQueueSend(volume_q, (void*)&volumeCmd, (TickType_t)0);
+      }
+      if(lastKnobValue != channels[6])
+      {
+        lastKnobValue = channels[6];
       }
       
       // Uncomment for testing:

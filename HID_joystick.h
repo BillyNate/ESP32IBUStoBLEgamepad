@@ -48,6 +48,10 @@ extern QueueHandle_t joystick_q;
  * @see mouse_command_t */
 extern QueueHandle_t mouse_q;
 
+/** @brief Queue for sending volume reports
+ * @see volume_command_t */
+extern QueueHandle_t volume_q;
+
 /** @brief Main init function to start HID interface
  * 
  * @param enableJoystick If != 0, joystick will be active
@@ -92,6 +96,13 @@ typedef struct mouse_command {
   /** @brief Y value, 1000 - 2000 */
   uint8_t y;
 } mouse_command_t;
+
+/** @brief One volume command (report) to be sent via BLE volume profile
+ * @see volume_q */
+typedef struct volume_command {
+  /** @brief Volume mask */
+  uint8_t updown;
+} volume_command_t;
 
 /** @brief Type of keycode action.
  * 
